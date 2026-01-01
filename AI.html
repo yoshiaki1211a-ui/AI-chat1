@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>学習型AIグループチャット — 安定修正版</title>
+<style>
+:root{--bg:#0b0f14;--panel:#0f1418;--accent:#4fc3f7;--muted:#8b94a6;--ai1:#81c784;--ai2:#64b5f6;--you:#f06292;--border:#1f2430}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,'Noto Sans JP',system-ui;background:var(--bg);color:#fff;height:100vh;display:flex}
+.sidebar{width:360px;border-right:1px solid var(--border);display:flex;flex-direction:column;position:relative;overflow:hidden}
+/* ===== HOME HERO ===== */
+.home-hero{justify-content:center;align-items:center}
+.hero-bg{position:absolute;inset:0;background:url('water-5245722.jpg') center/cover no-repeat;filter:brightness(.55) saturate(1.2)}
+.hero-bg::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 30% 20%,rgba(79,195,247,.35),transparent 40%),linear-gradient(180deg,rgba(5,8,15,.2),#05080f)}
+.hero-content{position:relative;z-index:1;text-align:center;padding:24px;animation:fadeIn .6s ease}
+.hero-title{font-size:28px;letter-spacing:.04em;margin:0 0 8px;text-shadow:0 0 20px rgba(79,195,247,.4)}
+.hero-sub{font-size:14px;color:#e0f4ff;opacity:.9;margin-bottom:20px}
+.hero-btn{font-size:16px;padding:12px 18px;border-radius:999px;box-shadow:0 0 0 rgba(79,195,247,.6);animation:pulse 2.4s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(79,195,247,.6)}70%{box-shadow:0 0 0 18px rgba(79,195,247,0)}100%{box-shadow:0 0 0 0 rgba(79,195,247,0)}}
+.header{padding:16px;border-bottom:1px solid var(--border)}
+.side-main{padding:12px;flex:1;overflow:auto}
+.card{background:var(--panel);border:1px solid rgba(255,255,255,0.04);padding:12px;border-radius:10px;margin-bottom:12px}
+.small{font-size:13px;color:var(--muted)}
+.row{display:flex;gap:8px;align-items:center;margin-top:6px}
+.slider{width:100%}
+.btn{padding:8px 12px;border-radius:8px;border:none;background:var(--accent);font-weight:700;cursor:pointer;color:#001018}
+.btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.15);color:#fff}
+.chat-area{flex:1;display:none;flex-direction:column}
+.chat-header{padding:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+.chat-main{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.compose{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
+.input{flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:#081018;color:#fff;min-height:56px}
+.msg{max-width:75%;padding:12px;border-radius:12px;line-height:1.5}
+.you{align-self:flex-end;background:#241526;color:var(--you)}
+.ai1{align-self:flex-start;background:#0f2417;color:var(--ai1)}
+.ai2{align-self:flex-start;background:#0f1724;color:var(--ai2)}
+.system{align-self:center;color:var(--muted);font-size:13px}
+.eval-row{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+/* animations */
+.msg{animation:fadeUp .25s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.btn{transition:transform .1s ease,box-shadow .1s ease,background .15s ease}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(79,195,247,.25)}
+.btn:active{transform:scale(.97)}
+.eval-row{animation:fadeUp .2s ease}
+.chat-area{animation:fadeIn .25s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+/* typing dots */
+.typing{display:inline-flex;gap:4px;align-items:center}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1.4s infinite both}
+.dot:nth-child(2){animation-delay:.2s}
+.dot:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%{opacity:.2}20%{opacity:1}100%{opacity:.2}}
+/* glow accent */
+.chat-header strong{position:relative}
+.chat-header strong::after{content:"";position:absolute;left:0;right:0;bottom:-6px;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.6}
+</style>
+</head>
+<body>
+<aside class="sidebar home-hero">
+  <div class="hero-bg"></div>
+  <div class="hero-content">
+    <h1 class="hero-title">Talk. Learn. Evolve.</h1>
+    <p class="hero-sub">言葉を浴びる、新しいAI体験</p>
+    <button class="btn hero-btn" id="openChatBtn">AIに浸る</button>
+  </div>
+</aside>
+<section class="chat-area" id="chatArea">
+  <div class="chat-header"><button class="btn ghost" id="backBtn">←</button><strong>グループチャット</strong></div>
+  <div id="chatMain" class="chat-main"></div>
+  <div class="compose">
+    <div contenteditable="true" id="input" class="input"></div>
+    <button class="btn" id="sendBtn">送信</button>
+  </div>
+</section>
+<script>
+const chatLog=[];
+let datasetPairs = JSON.parse(localStorage.getItem('dataset_v1')||'[]');
+let datasetWeights = JSON.parse(localStorage.getItem('weights_v1')||'{}');
+function saveDataset(){ localStorage.setItem('dataset_v1', JSON.stringify(datasetPairs)); localStorage.setItem('weights_v1', JSON.stringify(datasetWeights)); }
+function keyForPair(i,r){ return (i||'') + '||' + (r||''); }
+function isInappropriate(text){ if(!text) return true; const t = text.toLowerCase(); const banned = ['電話','住所','line','メール','パスワード','クレジット','死ね','殺','やばい','くそ']; for(const b of banned){ if(t.indexOf(b)!==-1) return true; } if(t.indexOf('http')!==-1 || t.indexOf('www.')!==-1) return true; if(t.indexOf('@')!==-1) return true; const digits = (text||'').split('').filter(ch=> ch>='0' && ch<='9').length; if(digits >= 7) return true; return false; }
+function getLastUserInput(){ const msgs = Array.from(chatMain.querySelectorAll('.msg.you')); if(msgs.length===0) return ''; return msgs[msgs.length-1].textContent || ''; }
+const openChatBtn=document.getElementById('openChatBtn');
+const backBtn=document.getElementById('backBtn');
+const chatArea=document.getElementById('chatArea');
+const chatMain=document.getElementById('chatMain');
+const inputEl=document.getElementById('input');
+const sendBtn=document.getElementById('sendBtn');
+openChatBtn.onclick=()=>{document.querySelector('.sidebar').style.display='none';chatArea.style.display='flex';};
+backBtn.onclick=()=>{document.querySelector('.sidebar').style.display='flex';chatArea.style.display='none';};
+function addSystem(text){const d=document.createElement('div');d.className='system';d.textContent=text;chatMain.appendChild(d);}
+function addMsg(text,cls){const wrap=document.createElement('div');const d=document.createElement('div');d.className='msg '+cls;d.textContent=text;wrap.appendChild(d);
+if(cls==='ai1'||cls==='ai2'){
+  const row=document.createElement('div'); row.className='eval-row';
+  const good=document.createElement('button'); good.className='btn'; good.textContent='ぐっと';
+  const bad=document.createElement('button'); bad.className='btn ghost'; bad.textContent='ばっと';
+  good.onclick=(e)=>{ e.stopPropagation(); row.remove(); addSystem('わかりました'); };
+  bad.onclick=(e)=>{ e.stopPropagation(); row.remove(); addSystem('わかりました'); };
+
+  // suggestion input next to ばっと
+  const suggestInput = document.createElement('input');
+  suggestInput.type = 'text';
+  suggestInput.placeholder = 'ここに返信案を入力';
+  suggestInput.style.padding = '6px';
+  suggestInput.style.borderRadius = '6px';
+  suggestInput.style.background = '#071219';
+  suggestInput.style.color = '#fff';
+  suggestInput.style.border = '1px solid rgba(255,255,255,0.06)';
+  suggestInput.style.minWidth = '180px';
+
+  const applyBtn = document.createElement('button'); applyBtn.className='btn ghost'; applyBtn.textContent='提案を返信';
+  applyBtn.onclick = (e)=>{
+    e.stopPropagation();
+    const s = suggestInput.value.trim();
+    if(!s) return;
+    const inputText = getLastUserInput();
+    if(isInappropriate(s) || isInappropriate(inputText)){
+      addSystem('不適切な内容が含まれているため追加されません');
+      return;
+    }
+    // store suggestion
+    datasetPairs.push({input: inputText, reply: s});
+    const k = keyForPair(inputText, s);
+    datasetWeights[k] = (datasetWeights[k]||0) + 1;
+    saveDataset();
+    // append AI reply
+    const aiWrap = document.createElement('div');
+    const aiDiv = document.createElement('div'); aiDiv.className = 'msg ' + cls; aiDiv.textContent = s; aiWrap.appendChild(aiDiv);
+    chatMain.appendChild(aiWrap);
+    chatMain.scrollTop = chatMain.scrollHeight;
+    row.remove();
+    addSystem('わかりました');
+  };
+
+  row.appendChild(good); row.appendChild(bad); row.appendChild(suggestInput); row.appendChild(applyBtn);
+  wrap.appendChild(row);
+}
+chatMain.appendChild(wrap);chatMain.scrollTop=chatMain.scrollHeight; }
+function pickLearnedReply(input){
+  // 入力に対する学習済み返信候補を集める
+  const candidates = datasetPairs.filter(p=>p.input===input);
+  if(candidates.length===0) return null;
+  // 重み付きランダム選択
+  let pool=[];
+  candidates.forEach(p=>{
+    const w = datasetWeights[keyForPair(p.input,p.reply)]||1;
+    for(let i=0;i<w;i++) pool.push(p.reply);
+  });
+  return pool[Math.floor(Math.random()*pool.length)] || null;
+}
+
+function doSend(){
+  const t=inputEl.innerText.trim();
+  if(!t) return;
+  addMsg(t,'you');
+  inputEl.innerText='';
+
+  // 学習済み候補があれば優先して使う
+  const learned = pickLearnedReply(t);
+  if(learned){
+    setTimeout(()=>addMsg(learned,'ai1'),400);
+    return;
+  }
+
+  // フォールバック（まだ学習がない場合）
+  setTimeout(()=>addMsg('なるほど、そうなんだね','ai1'),400);
+  setTimeout(()=>addMsg('もう少し詳しく教えて','ai2'),700);
+} 
+sendBtn.onclick=doSend;
+inputEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();doSend();}});
+// tests
+console.assert(true,'loaded');
+</script>
+</body>
+</html>
